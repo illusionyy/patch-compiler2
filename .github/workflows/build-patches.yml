@@ -1,0 +1,68 @@
+name: build patches
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.event_name  }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Tell tools version
+        run: |
+          clang -v
+
+      - name: Set environment variables
+        run: |
+          echo "PS4_PAYLOAD_SDK=${{ runner.tool_cache }}/opt/ps4-payload-sdk" >> ${{ github.env }}
+          echo "NXDK_DIR=${{ runner.tool_cache }}/opt/nxdk" >> ${{ github.env }}
+
+      - name: Checkout Update PS4 SDK
+        uses: actions/checkout@main
+        with:
+          repository: ps4-payload-dev/sdk
+
+      - name: Install update PS4 SDK
+        run: make "DESTDIR=${{ env.PS4_PAYLOAD_SDK }}" clean install -j "$(nproc)"
+
+      - name: Setup nxdk
+        run: |
+          git clone https://github.com/XboxDev/nxdk.git ${{ env.NXDK_DIR }}
+          cd ${{ env.NXDK_DIR }}
+          git submodule update --init -- lib/pdclib
+
+      - uses: actions/checkout@main
+
+      - name: install toolchain
+        run: |
+          sudo apt update
+          sudo apt install -y clang lld llvm binutils
+
+      - uses: actions/setup-python@main
+        with:
+          python-version: "3.11"
+
+      - name: install python deps
+        run: pip install -r requirements.txt
+
+      - name: export pc2
+        run: echo "PATCH_COMPILER2=$PWD" >> ${{ github.env }}
+
+      - name: build example patches
+        run: |
+          make -C examples/ps4-test
+          make -C examples/win32-test
+
+      - name: upload build outputs
+        uses: actions/upload-artifact@main
+        with:
+          name: patch-outputs
+          path: |
+            examples/**/build/final*
+            examples/**/build/release*
+          if-no-files-found: error
